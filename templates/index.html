@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PTDTS - Pan Tilt Drone Detection and Tracking System</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <h1 class="title">PTDTS Control Interface</h1>
+                <div class="connection-status" id="connection-status">
+                    <span class="status-indicator" id="status-indicator"></span>
+                    <span id="status-text">Connecting...</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Grid Layout -->
+        <div class="main-grid">
+            <!-- Left Column: Video and State -->
+            <div class="left-column">
+                <!-- Video Feed -->
+                <section class="panel video-panel">
+                    <div class="panel-header">
+                        <h2>Live Camera Feed</h2>
+                        <span class="info-badge" id="active-camera">HQ Camera</span>
+                    </div>
+                    <div class="video-container">
+                        <img id="video-feed" src="{{ url_for('video_feed') }}" alt="Camera Feed">
+                        <div class="video-overlay">
+                            <div class="overlay-info">
+                                <span id="detector-fps">FPS: 0.0</span>
+                                <span id="inference-time">Inference: 0.0ms</span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- State Machine Status -->
+                <section class="panel state-panel">
+                    <div class="panel-header">
+                        <h2>State Machine</h2>
+                        <span class="state-badge" id="current-state">LISTENING</span>
+                    </div>
+                    <div class="panel-content">
+                        <div class="info-grid">
+                            <div class="info-item">
+                                <span class="label">Current State:</span>
+                                <span class="value" id="state-value">LISTENING</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="label">State Duration:</span>
+                                <span class="value" id="state-duration">0.0s</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="label">Target Info:</span>
+                                <span class="value" id="target-info">No target</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="label">Acoustic Detection:</span>
+                                <span class="value" id="acoustic-info">None</span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- Middle Column: Telemetry -->
+            <div class="middle-column">
+                <!-- Pan Axis Telemetry -->
+                <section class="panel telemetry-panel">
+                    <div class="panel-header">
+                        <h2>Pan Axis</h2>
+                        <span class="mode-badge" id="pan-mode">IDLE</span>
+                    </div>
+                    <div class="panel-content">
+                        <div class="telemetry-grid">
+                            <div class="telemetry-item">
+                                <span class="label">Position:</span>
+                                <span class="value mono" id="pan-position">0.0 deg</span>
+                            </div>
+                            <div class="telemetry-item">
+                                <span class="label">Velocity:</span>
+                                <span class="value mono" id="pan-velocity">0.0 deg/s</span>
+                            </div>
+                            <div class="telemetry-item">
+                                <span class="label">Target Position:</span>
+                                <span class="value mono" id="pan-target-pos">None</span>
+                            </div>
+                            <div class="telemetry-item">
+                                <span class="label">Target Velocity:</span>
+                                <span class="value mono" id="pan-target-vel">None</span>
+                            </div>
+                            <div class="telemetry-item">
+                                <span class="label">Encoder Counts:</span>
+                                <span class="value mono" id="pan-encoder">0</span>
+                            </div>
+                            <div class="telemetry-item">
+                                <span class="label">PWM Output:</span>
+                                <span class="value mono" id="pan-pwm">0.00</span>
+                            </div>
+                        </div>
+                        <div class="progress-bar-container">
+                            <div class="progress-label">Position (0-360 deg)</div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="pan-progress"></div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Tilt Axis Telemetry -->
+                <section class="panel telemetry-panel">
+                    <div class="panel-header">
+                        <h2>Tilt Axis</h2>
+                    </div>
+                    <div class="panel-content">
+                        <div class="telemetry-grid">
+                            <div class="telemetry-item">
+                                <span class="label">Current Angle:</span>
+                                <span class="value mono" id="tilt-angle">90.0 deg</span>
+                            </div>
+                            <div class="telemetry-item">
+                                <span class="label">Target Angle:</span>
+                                <span class="value mono" id="tilt-target">90.0 deg</span>
+                            </div>
+                            <div class="telemetry-item">
+                                <span class="label">PWM Pulse:</span>
+                                <span class="value mono" id="tilt-pwm">1500 us</span>
+                            </div>
+                        </div>
+                        <div class="progress-bar-container">
+                            <div class="progress-label">Angle (0-180 deg)</div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="tilt-progress"></div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Detection Info -->
+                <section class="panel detection-panel">
+                    <div class="panel-header">
+                        <h2>Visual Detection</h2>
+                    </div>
+                    <div class="panel-content">
+                        <div class="telemetry-grid">
+                            <div class="telemetry-item">
+                                <span class="label">Detector FPS:</span>
+                                <span class="value mono" id="detector-fps-value">0.0</span>
+                            </div>
+                            <div class="telemetry-item">
+                                <span class="label">Inference Time:</span>
+                                <span class="value mono" id="inference-time-value">0.0 ms</span>
+                            </div>
+                            <div class="telemetry-item">
+                                <span class="label">Active Camera:</span>
+                                <span class="value" id="active-camera-name">HQ</span>
+                            </div>
+                            <div class="telemetry-item">
+                                <span class="label">Detection Mode:</span>
+                                <span class="value" id="detection-mode">Idle</span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- System Info -->
+                <section class="panel system-panel">
+                    <div class="panel-header">
+                        <h2>System Information</h2>
+                    </div>
+                    <div class="panel-content">
+                        <div class="telemetry-grid">
+                            <div class="telemetry-item">
+                                <span class="label">Simulation Mode:</span>
+                                <span class="value" id="sim-mode">Unknown</span>
+                            </div>
+                            <div class="telemetry-item">
+                                <span class="label">Control Loop:</span>
+                                <span class="value mono">50 Hz</span>
+                            </div>
+                            <div class="telemetry-item">
+                                <span class="label">Max Pan Velocity:</span>
+                                <span class="value mono" id="max-pan-vel">180.0 deg/s</span>
+                            </div>
+                            <div class="telemetry-item">
+                                <span class="label">Max Pan Accel:</span>
+                                <span class="value mono" id="max-pan-accel">360.0 deg/s^2</span>
+                            </div>
+                            <div class="telemetry-item">
+                                <span class="label">Tilt Range:</span>
+                                <span class="value mono" id="tilt-range">0-180 deg</span>
+                            </div>
+                            <div class="telemetry-item">
+                                <span class="label">HQ Camera:</span>
+                                <span class="value mono" id="hq-camera-res">1280x720 @ 30 FPS</span>
+                            </div>
+                            <div class="telemetry-item">
+                                <span class="label">GS Camera:</span>
+                                <span class="value mono" id="gs-camera-res">640x480 @ 60 FPS</span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- Right Column: Controls and Logs -->
+            <div class="right-column">
+                <!-- Manual Control -->
+                <section class="panel control-panel">
+                    <div class="panel-header">
+                        <h2>Manual Control</h2>
+                        <button class="btn" id="toggle-manual" onclick="toggleManualMode()">
+                            Enable Manual
+                        </button>
+                    </div>
+                    <div class="panel-content">
+                        <!-- State Control -->
+                        <div class="control-section">
+                            <h3>State Control</h3>
+                            <div class="button-group">
+                                <select id="state-selector" onchange="switchState(this.value)" class="state-select">
+                                    <option value="">-- Select State --</option>
+                                    <option value="listening">LISTENING</option>
+                                    <option value="panning">PANNING</option>
+                                    <option value="detecting">DETECTING</option>
+                                    <option value="tracking">TRACKING</option>
+                                    <option value="manual">MANUAL</option>
+                                    <option value="error">ERROR</option>
+                                </select>
+                            </div>
+                            <div class="info-text" style="font-size: 0.8em; margin-top: 5px;">
+                                <span>Current: <strong id="current-state-display">LISTENING</strong></span>
+                            </div>
+                        </div>
+
+                        <!-- Camera Control -->
+                        <div class="control-section">
+                            <h3>Camera Control</h3>
+                            <div class="button-group">
+                                <button class="btn-control" onclick="switchCamera('hq')" id="camera-hq">
+                                    HQ Camera
+                                </button>
+                                <button class="btn-control" onclick="switchCamera('gs')" id="camera-gs">
+                                    GS Camera
+                                </button>
+                                <button class="btn-control" onclick="cameraAutoMode()" id="camera-auto">
+                                    Auto Mode
+                                </button>
+                            </div>
+                            <div class="info-text" style="font-size: 0.8em; margin-top: 5px;">
+                                <span>Active: <strong id="active-camera-display">HQ</strong></span>
+                                <span style="margin-left: 10px;">Override: <strong id="camera-override-display">No</strong></span>
+                            </div>
+                        </div>
+
+                        <div class="control-section">
+                            <h3>Pan Control</h3>
+                            <div class="slider-container">
+                                <label for="pan-velocity-ctrl">Velocity: <span id="pan-vel-display">0.0</span> deg/s</label>
+                                <input type="range" id="pan-velocity-ctrl" min="-180" max="180" value="0" step="1"
+                                       oninput="updatePanVelocity(this.value)" disabled>
+                            </div>
+                            <div class="button-group">
+                                <button class="btn-control" onclick="setPanVelocity(-30)" disabled id="pan-left">
+                                    Left
+                                </button>
+                                <button class="btn-control" onclick="setPanVelocity(0)" disabled id="pan-stop">
+                                    Stop
+                                </button>
+                                <button class="btn-control" onclick="setPanVelocity(30)" disabled id="pan-right">
+                                    Right
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="control-section">
+                            <h3>Tilt Control</h3>
+                            <div class="slider-container">
+                                <label for="tilt-angle-ctrl">Angle: <span id="tilt-angle-display">90</span> deg</label>
+                                <input type="range" id="tilt-angle-ctrl" min="0" max="180" value="90" step="1"
+                                       oninput="updateTiltAngle(this.value)" disabled>
+                            </div>
+                            <div class="button-group">
+                                <button class="btn-control" onclick="setTiltAngle(0)" disabled id="tilt-up">
+                                    Up (0 deg)
+                                </button>
+                                <button class="btn-control" onclick="setTiltAngle(90)" disabled id="tilt-center">
+                                    Center (90 deg)
+                                </button>
+                                <button class="btn-control" onclick="setTiltAngle(180)" disabled id="tilt-down">
+                                    Down (180 deg)
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="control-info">
+                            <p class="info-text">Manual control requires MANUAL mode to be enabled. Auto mode will resume normal operation.</p>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- State History -->
+                <section class="panel log-panel">
+                    <div class="panel-header">
+                        <h2>State Transition History</h2>
+                    </div>
+                    <div class="panel-content">
+                        <div class="log-container" id="state-history">
+                            <div class="log-entry">Awaiting state transitions...</div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Event Log -->
+                <section class="panel log-panel">
+                    <div class="panel-header">
+                        <h2>System Event Log</h2>
+                        <button class="btn-small" onclick="clearEventLog()">Clear</button>
+                    </div>
+                    <div class="panel-content">
+                        <div class="log-container" id="event-log">
+                            <div class="log-entry">
+                                <span class="log-time">[00:00:00]</span>
+                                <span class="log-message">Web interface initialized</span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Performance Metrics -->
+                <section class="panel metrics-panel">
+                    <div class="panel-header">
+                        <h2>Performance Metrics</h2>
+                    </div>
+                    <div class="panel-content">
+                        <div class="metrics-grid">
+                            <div class="metric-item">
+                                <span class="metric-label">Update Rate</span>
+                                <span class="metric-value" id="update-rate">10 Hz</span>
+                            </div>
+                            <div class="metric-item">
+                                <span class="metric-label">Latency</span>
+                                <span class="metric-value" id="latency">0 ms</span>
+                            </div>
+                            <div class="metric-item">
+                                <span class="metric-label">Uptime</span>
+                                <span class="metric-value" id="uptime">00:00:00</span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>

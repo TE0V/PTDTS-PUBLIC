@@ -1,0 +1,323 @@
+# PTDTS Configuration File
+# All system parameters configurable at runtime
+
+# Simulation mode - set to true for testing without hardware
+simulation_mode: false
+
+# Pan Motor Configuration (DC Motor with Encoder)
+pan_motor:
+  # Calibrated encoder counts per 360° rotation
+  # NOTE: User tested and confirmed -2171 (updated calibration)
+  encoder_counts_per_360: -2171
+
+  # Gear reduction ratio
+  gear_ratio: 135.0  # 30:1 motor * 4.5:1 external
+
+  # Motor driver GPIO pins (DRV8874) - Swapped to correct direction
+  gpio_in1: 22  # Pin 15 (swapped from 27)
+  gpio_in2: 27  # Pin 13 (swapped from 22)
+  # Note: PMODE + SLEEP tied to Pin 17 (3.3V) - always enabled, no software control needed
+
+  # LS7366R Encoder Buffer (SPI0)
+  # Pin 19 - GPIO 10 - MOSI
+  # Pin 21 - GPIO 9  - MISO
+  # Pin 23 - GPIO 11 - SCK
+  # Pin 24 - GPIO 8  - CS1
+  encoder_spi_bus: 0
+  encoder_spi_device: 0  # CS0 = GPIO 8
+  encoder_mode: 0  # Non-quadrature mode (quadrature modes were freezing the LS7366R)
+
+  # Motor control limits
+  max_velocity_dps: 90.0  # degrees per second (reduced from 180 for smoother tracking)
+  max_acceleration_dps2: 360.0  # degrees per second squared
+  max_pwm: 0.70  # Maximum PWM duty cycle
+  min_pwm: 0.30  # Minimum to overcome friction (verified from test_pan_motor.py)
+  startup_boost: 0.35  # Extra torque when starting from stop (increased for reliable breakout)
+
+  # Control loop
+  control_rate_hz: 50
+
+  # Position control (for acoustic panning)
+  # Gains reduced to dampen oscillation (was causing feedback loop with camera latency)
+  position_pid:
+    kp: 0.5    # Reduced from 0.8 - less aggressive response
+    ki: 0.03   # Reduced from 0.05 - less integral windup
+    kd: 0.05   # Reduced from 0.1 - less derivative kick
+    deadzone_degrees: 2.0
+
+  # Velocity control (inner loop for POSITION mode cascaded control)
+  velocity_pid:
+    kp: 0.05   # Increased from 0.015 for better velocity tracking
+    ki: 0.01   # Increased from 0.002 for steady-state accuracy
+    kd: 0.002  # Increased from 0.001 for damping
+
+  # Panning behavior
+  panning:
+    approach_distance_degrees: 30.0  # Start decelerating at this distance
+    arrival_threshold_degrees: 5.0  # Consider "arrived" within this
+    decel_factor: 0.3  # Speed multiplier during approach
+
+# Tilt Servo Configuration (Axon MAX MK2)
+tilt_servo:
+  # Servo control
+  gpio_pwm: 18  # Pin 12 (HARDWARE PWM - required for Pi 5)
+  pwm_frequency: 333  # Hz (Axon MAX MK2 spec - high performance)
+  pwm_min: 500  # Microseconds (0°) - verified from Axon software
+  pwm_max: 2500  # Microseconds (90°) - HARD LIMITED for safety
+  # Note: 1500µs = 45° (center of 0-90° range)
+
+  # ADS1115 ADC for position feedback (I2C)
+  closed_loop: false  # Set true to enable analog feedback
+  ads1115_address: 0x48
+  ads1115_channel: 0  # A0
+  voltage_min: 0.5  # Voltage at 0°
+  voltage_max: 4.5  # Voltage at 90°
+
+  # Servo limits (RESTRICTED: 0-90° only to prevent system damage)
+  min_angle: 0    # Looking down
+  max_angle: 90   # Horizontal (HARD LIMIT - servo can tear itself apart beyond this!)
+  default_angle: 45  # Center of safe range (1500µs)
+
+  # Closed-loop PID (if enabled)
+  position_pid:
+    kp: 2.0
+    ki: 0.1
+    kd: 0.3
+    deadzone_degrees: 1.0
+
+  # Motion smoothing for drone tracking
+  slew_rate_dps: 15.0  # Very slow for smooth tracking (6 seconds for full 0-90° travel)
+  acceleration_profile: s_curve  # Smooth acceleration/deceleration for minimal camera shake
+
+# Camera Configuration
+cameras:
+  hq:
+    enabled: true
+    index: 0  # CAM0
+    resolution: [960, 540]  # Reduced from 1280x720 for better performance (~2x faster YOLO)
+    framerate: 30
+    format: "RGB888"
+
+    # Field of view (degrees) - User calibrated values (for 1280x720, will scale)
+    fov_h: 58.6
+    fov_v: 35.7
+
+    # Camera controls (manual lens - no autofocus/auto-exposure)
+    # Fast shutter speed to prevent motion blur during tracking
+    controls:
+      ExposureTime: 16000     # 16ms shutter (balance: fast enough for motion, slow enough for brightness)
+      AnalogueGain: 6.0       # Fixed gain (increased from 4.0 for better brightness)
+      AeEnable: false         # Disable auto-exposure (manual lens)
+      AwbEnable: false        # Disable auto white balance for performance
+
+    # Detection parameters
+    detection_confidence: 0.4
+
+  gs:
+    enabled: false  # DISABLED - user only uses HQ camera indoors
+    index: 1  # CAM1
+    resolution: [640, 480]
+    framerate: 60
+    format: "RGB888"
+
+    # Field of view (degrees)
+    fov_h: 45.0
+    fov_v: 34.0
+
+    # Tracking parameters
+    tracking_confidence: 0.3
+
+  # Camera switching (GS camera disabled, so switching won't occur)
+  switching:
+    settling_delay_ms: 500  # Delay after switch before using frames
+    gs_center_threshold_percent: 15  # Only switch to GS if target within this % of frame center (STRICT: drone must be well-centered)
+
+# Acoustic Detection Configuration
+acoustic:
+  enabled: true
+
+  # ReSpeaker array geometry
+  mic_radius_mm: 46.5
+  mic_count: 4
+
+  # ODAS configuration
+  odas_port: 9000
+  odas_config_path: /opt/odas/config/ptdts_respeaker.cfg  # Auto-generated if not present
+
+  # Detection thresholds
+  energy_threshold: 0.2
+  frequency_min: 100.0  # Hz
+  frequency_max: 500.0  # Hz
+
+  # Acoustic signature detection (future: FFT-based)
+  signature_enabled: false
+
+# YOLO Detection Configuration
+yolo:
+  # Model path - supports two formats (auto-detected):
+  #   PyTorch: models/yolov11n-UAV-finetune.pt (slower, ~5-10 FPS on Pi 5)
+  #   NCNN: models/yolov11n-UAV-finetune_ncnn_model/model.ncnn (faster, ~15-30 FPS on Pi 5)
+  #     Note: NCNN path is without extension - .param and .bin files will be auto-loaded
+  # Recommended: Use NCNN format for best performance on ARM64
+  model_path: models/yolov11n-UAV-finetune_ncnn_model/model.ncnn
+  device: cpu  # or 'cuda' if available (PyTorch only)
+
+  # Detection thresholds
+  detection_confidence: 0.4  # HQ camera (detection mode)
+  tracking_confidence: 0.3   # GS camera (tracking mode)
+  iou_threshold: 0.45
+
+  # Classes to detect (null = all classes)
+  classes: null
+
+  # Inference settings
+  max_det: 10  # Maximum detections per frame
+  verbose: false
+
+# Tracking Configuration
+tracking:
+  # Position-based tracking damping factor
+  # Controls what fraction of calculated angle offset to move per detection
+  # Lower = more conservative (0.3), Higher = more aggressive (0.6)
+  # Recommended: 0.4 for stable tracking with slow YOLO detection rate
+  position_damping: 0.4
+
+  # Direct PWM control for tracking (DEPRECATED - now using position control)
+  use_direct_pwm: true
+
+  # Pixel error to velocity conversion (DEPRECATED - only used if use_direct_pwm=false)
+  pixel_to_velocity_gain: 0.4
+
+  # Deadzone (prevents jitter when centered)
+  # Increased to 40 pixels (~1.9° on HQ camera) to prevent oscillation
+  deadzone_pixels: 40
+
+  # Velocity limits
+  max_velocity_dps: 180.0
+  velocity_deadband: 30.0  # counts/sec
+
+  # Target loss and reacquisition
+  loss_timeout_seconds: 10.0  # Return to LISTENING if no detection for 10 seconds
+  reacquisition_timeout_seconds: 3.0  # Try to reacquire for 3s before giving up
+  continue_last_direction: true  # Keep moving in last known direction when target lost
+
+# State Machine Configuration
+state_machine:
+  initial_state: LISTENING
+
+  # State timeouts
+  timeouts:
+    panning: 10.0  # Max time in PANNING state (seconds)
+    detecting: 5.0  # Max time in DETECTING state
+    tracking: 300.0  # Max continuous tracking time
+
+  # Transition conditions
+  detection:
+    min_acoustic_confidence: 0.2
+    min_visual_confidence: 0.4
+    visual_confirmation_frames: 3  # Consecutive detections required
+
+# Web Interface Configuration
+web:
+  host: "0.0.0.0"
+  port: 5000
+  debug: false
+
+  # Video streaming
+  video:
+    quality: 85  # JPEG quality (0-100)
+    max_fps: 30  # Limit streaming FPS
+
+  # Telemetry update rate
+  telemetry_rate_hz: 10
+
+  # Manual control
+  manual:
+    pan_velocity_dps: 30.0
+    tilt_velocity_dps: 20.0
+    keyboard_enabled: true
+    gamepad_enabled: false  # Gamepad disabled for performance
+
+# Gamepad Controller Configuration (Xbox Controller)
+gamepad:
+  enabled: false  # Disabled for performance - user doesn't need gamepad
+
+  # Deadzone thresholds (0.0 to 1.0)
+  stick_deadzone: 0.15  # Analog stick deadzone
+  trigger_deadzone: 0.1  # Trigger deadzone
+
+  # Sensitivity settings
+  pan_sensitivity: 120.0  # Max pan velocity from full stick deflection (deg/s)
+  tilt_sensitivity: 60.0  # Max tilt rate from full stick deflection (deg/s)
+
+  # Modifiers
+  fine_control_multiplier: 0.3  # Sensitivity when left trigger held
+  turbo_multiplier: 2.0  # Sensitivity multiplier when right trigger held
+
+  # D-pad step sizes
+  dpad_pan_step: 5.0  # Pan step per D-pad press (deg/s)
+  dpad_tilt_step: 2.0  # Tilt step per D-pad press (deg)
+
+  # Button actions
+  quick_center_pan: 0.0  # Pan angle for quick center (degrees)
+  quick_center_tilt: 90.0  # Tilt angle for quick center (degrees)
+  pan_step_angle: 15.0  # Pan step for LB/RB buttons (degrees)
+
+# Data Logging Configuration
+logging:
+  # Console output
+  console_level: INFO  # DEBUG, INFO, WARNING, ERROR
+
+  # File output
+  file_enabled: true
+  file_level: DEBUG
+  file_path: logs/ptdts.log
+  file_max_bytes: 10485760  # 10MB
+  file_backup_count: 5
+
+  # Telemetry CSV
+  telemetry_enabled: true
+  telemetry_path: logs/telemetry.csv
+  telemetry_rate_hz: 10
+
+  # Detection events
+  detections_enabled: true
+  detections_path: logs/detections.csv
+
+# Coordinate System Configuration
+coordinates:
+  # Origin definition
+  origin_lat: 0.0  # Placeholder for GPS integration
+  origin_lon: 0.0
+  origin_alt: 0.0
+
+  # Angle conventions
+  azimuth_zero: "north"  # 0° = North
+  elevation_zero: "horizontal"  # 90° = horizontal
+
+  # Range estimation (future: stereo ranging)
+  default_range_meters: 50.0
+
+# Calibration Data (loaded from calibration.json if exists)
+calibration:
+  encoder_offset: 0  # Encoder count at 0° azimuth
+  servo_offset: 0    # Servo angle offset
+  camera_offsets:
+    hq: [0.0, 0.0]  # [pan_offset, tilt_offset] in degrees
+    gs: [0.0, 0.0]
+  acoustic_offset: 0.0  # Azimuth offset for mic array
+
+# Performance Monitoring
+performance:
+  monitoring_enabled: true
+  stats_interval_seconds: 10
+
+  # Main loop rate (detection + state machine updates)
+  # Reduced from 50Hz to 15Hz for better performance (YOLO is slow)
+  # Pan motor still runs at 50Hz in its own thread
+  main_loop_rate_hz: 15
+
+  # Warnings
+  warn_loop_overrun: true
+  warn_detection_latency_ms: 100
+  warn_cpu_temp_celsius: 75
